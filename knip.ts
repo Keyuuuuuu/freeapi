@@ -7,6 +7,8 @@ const config: KnipConfig = {
     "wxt.config.ts",
     "i18next.config.ts",
     "vitest.config.ts",
+    "scripts/cors-proxy.js",
+    "scripts/post-build-web.js",
     "scripts/diagnostics/collect-extension-memory.mjs",
     "scripts/diagnostics/compare-extension-memory.mjs",
     "scripts/diagnostics/compare-lazy-loading.mjs",
