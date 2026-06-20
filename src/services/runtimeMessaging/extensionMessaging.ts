@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax */
 import type {
   ExtensionMessagingConfig,
   ExtensionMessenger,
@@ -130,6 +131,77 @@ export function defineExtensionMessaging<
   TProtocolMap extends Record<string, any> = Record<string, any>,
 >(config: ExtensionMessagingConfig = {}): ExtensionMessenger<TProtocolMap> {
   type MessageType = keyof TProtocolMap & string
+
+  const isWebMode =
+    typeof (globalThis as any).chrome === "undefined" ||
+    !(globalThis as any).chrome.runtime ||
+    !(globalThis as any).chrome.runtime.onMessage ||
+    (globalThis as any).chrome.runtime.id === "all-api-hub-web"
+
+  if (isWebMode) {
+    return {
+      async sendMessage<TType extends MessageType>(
+        type: TType,
+        data: any,
+        _arg?: any,
+      ) {
+        config.logger?.debug(
+          `[web-messaging] sendMessage ${String(type)}`,
+          data,
+        )
+        const globalRegistry =
+          (globalThis as any).__webMessageRegistry ||
+          ((globalThis as any).__webMessageRegistry = new Map())
+        const listener = globalRegistry.get(type)
+        if (!listener) {
+          config.logger?.warn(
+            `[web-messaging] No listener registered for type ${String(type)}`,
+          )
+          return undefined as any
+        }
+        try {
+          const res = await listener({
+            type,
+            data,
+            timestamp: Date.now(),
+            sender: { id: "web-sender" },
+          })
+          config.logger?.debug(
+            `[web-messaging] sendMessage ${String(type)} success`,
+            res,
+          )
+          return res
+        } catch (error) {
+          config.logger?.error(
+            `[web-messaging] sendMessage ${String(type)} failed`,
+            error,
+          )
+          throw error
+        }
+      },
+      onMessage<TType extends MessageType>(
+        type: TType,
+        onReceived: (message: any) => any,
+      ) {
+        config.logger?.debug(
+          `[web-messaging] Registering listener for ${String(type)}`,
+        )
+        const globalRegistry =
+          (globalThis as any).__webMessageRegistry ||
+          ((globalThis as any).__webMessageRegistry = new Map())
+        globalRegistry.set(type, onReceived)
+        return () => {
+          globalRegistry.delete(type)
+        }
+      },
+      removeAllListeners() {
+        const globalRegistry = (globalThis as any).__webMessageRegistry
+        if (globalRegistry) {
+          globalRegistry.clear()
+        }
+      },
+    } as any
+  }
 
   let removeRootListener: (() => void) | undefined
   const perTypeListeners: Partial<{

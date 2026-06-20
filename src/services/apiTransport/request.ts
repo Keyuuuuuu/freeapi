@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax */
 import { RuntimeActionIds } from "~/constants/runtimeActions"
 import { buildCompatUserIdHeaders } from "~/services/apiTransport/compatHeaders"
 import { REQUEST_CONFIG } from "~/services/apiTransport/constant"
@@ -433,7 +434,45 @@ const apiRequest = async <T>(
   endpoint: string | undefined,
   responseType: TempWindowResponseType,
 ): Promise<ApiResponse<T> | T> => {
-  const response = await fetch(url, options)
+  const isWebMode =
+    typeof (globalThis as any).chrome === "undefined" ||
+    !(globalThis as any).chrome.runtime ||
+    !(globalThis as any).chrome.runtime.onMessage ||
+    (globalThis as any).chrome.runtime.id === "all-api-hub-web"
+
+  let requestUrl = url
+  let requestOptions = options
+
+  if (
+    isWebMode &&
+    (url.startsWith("http://") || url.startsWith("https://")) &&
+    !url.includes(window.location.host)
+  ) {
+    requestUrl = "/cors-proxy"
+    const originalHeaders = options?.headers || {}
+    const headers: Record<string, string> = {}
+    if (originalHeaders instanceof Headers) {
+      originalHeaders.forEach((value, key) => {
+        headers[key] = value
+      })
+    } else if (Array.isArray(originalHeaders)) {
+      originalHeaders.forEach(([key, value]) => {
+        headers[key] = value
+      })
+    } else {
+      Object.entries(originalHeaders).forEach(([key, value]) => {
+        headers[key] = String(value)
+      })
+    }
+    headers["x-target-url"] = url
+
+    requestOptions = {
+      ...options,
+      headers,
+    }
+  }
+
+  const response = await fetch(requestUrl, requestOptions)
 
   if (!response.ok) {
     let errorCode: ApiErrorCode = API_ERROR_CODES.HTTP_OTHER
