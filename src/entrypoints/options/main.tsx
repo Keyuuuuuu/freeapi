@@ -1,4 +1,6 @@
 /* eslint-disable no-restricted-syntax, no-console, no-restricted-globals */
+import "~/utils/browser/browserApi"
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React, { Suspense } from "react"
 import ReactDOM from "react-dom/client"
