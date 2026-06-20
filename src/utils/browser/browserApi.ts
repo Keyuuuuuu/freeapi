@@ -20,233 +20,236 @@ import { createLogger } from "~/utils/core/logger"
 const logger = createLogger("BrowserApi")
 
 // 确保 browser 全局对象可用
-if (typeof (globalThis as any).browser === "undefined") {
-  if (typeof (globalThis as any).chrome !== "undefined") {
-    ;(globalThis as any).browser = (globalThis as any).chrome
-  } else {
-    logger.warn("browser API unavailable: initializing web-only mocks")
+const hasRealExtensionApi =
+  typeof (globalThis as any).chrome !== "undefined" &&
+  typeof (globalThis as any).chrome.runtime !== "undefined" &&
+  typeof (globalThis as any).chrome.storage !== "undefined"
 
-    // Global lists for storage and alarm listeners
-    const storageListeners = new Set<(changes: any, area: string) => void>()
-    const alarmListeners = new Set<(alarm: any) => void>()
+if (!hasRealExtensionApi) {
+  logger.warn("browser API unavailable: initializing web-only mocks")
 
-    const localStore = {
-      get: async (keys?: string | string[] | Record<string, any> | null) => {
-        const res: Record<string, any> = {}
-        if (keys === null || keys === undefined) {
-          for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i)
-            if (k) {
-              try {
-                res[k] = JSON.parse(localStorage.getItem(k) || "null")
-              } catch {
-                res[k] = localStorage.getItem(k)
-              }
-            }
-          }
-          return res
-        }
-        if (typeof keys === "string") {
-          const val = localStorage.getItem(keys)
-          if (val !== null) {
-            try {
-              res[keys] = JSON.parse(val)
-            } catch {
-              res[keys] = val
-            }
-          }
-          return res
-        }
-        if (Array.isArray(keys)) {
-          for (const k of keys) {
-            const val = localStorage.getItem(k)
-            if (val !== null) {
-              try {
-                res[k] = JSON.parse(val)
-              } catch {
-                res[k] = val
-              }
-            }
-          }
-          return res
-        }
-        if (typeof keys === "object") {
-          for (const k of Object.keys(keys)) {
-            const val = localStorage.getItem(k)
-            if (val !== null) {
-              try {
-                res[k] = JSON.parse(val)
-              } catch {
-                res[k] = val
-              }
-            } else {
-              res[k] = keys[k]
-            }
-          }
-          return res
-        }
-        return res
-      },
-      set: async (items: Record<string, any>) => {
-        const changes: Record<string, any> = {}
-        for (const [k, v] of Object.entries(items)) {
-          const oldValStr = localStorage.getItem(k)
-          let oldVal = null
-          if (oldValStr !== null) {
-            try {
-              oldVal = JSON.parse(oldValStr)
-            } catch {
-              oldVal = oldValStr
-            }
-          }
-          localStorage.setItem(k, JSON.stringify(v))
-          changes[k] = { oldValue: oldVal, newValue: v }
-        }
-        for (const listener of storageListeners) {
-          try {
-            listener(changes, "local")
-          } catch (e) {
-            console.error(e)
-          }
-        }
-      },
-      remove: async (keys: string | string[]) => {
-        const changes: Record<string, any> = {}
-        const keysArr = Array.isArray(keys) ? keys : [keys]
-        for (const k of keysArr) {
-          const oldValStr = localStorage.getItem(k)
-          let oldVal = null
-          if (oldValStr !== null) {
-            try {
-              oldVal = JSON.parse(oldValStr)
-            } catch {
-              oldVal = oldValStr
-            }
-            localStorage.removeItem(k)
-            changes[k] = { oldValue: oldVal, newValue: undefined }
-          }
-        }
-        for (const listener of storageListeners) {
-          try {
-            listener(changes, "local")
-          } catch (e) {
-            console.error(e)
-          }
-        }
-      },
-      clear: async () => {
-        const changes: Record<string, any> = {}
+  // Global lists for storage and alarm listeners
+  const storageListeners = new Set<(changes: any, area: string) => void>()
+  const alarmListeners = new Set<(alarm: any) => void>()
+
+  const localStore = {
+    get: async (keys?: string | string[] | Record<string, any> | null) => {
+      const res: Record<string, any> = {}
+      if (keys === null || keys === undefined) {
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i)
           if (k) {
-            const oldValStr = localStorage.getItem(k)
-            let oldVal = null
-            if (oldValStr !== null) {
-              try {
-                oldVal = JSON.parse(oldValStr)
-              } catch {
-                oldVal = oldValStr
-              }
-              changes[k] = { oldValue: oldVal, newValue: undefined }
+            try {
+              res[k] = JSON.parse(localStorage.getItem(k) || "null")
+            } catch {
+              res[k] = localStorage.getItem(k)
             }
           }
         }
-        localStorage.clear()
-        for (const listener of storageListeners) {
+        return res
+      }
+      if (typeof keys === "string") {
+        const val = localStorage.getItem(keys)
+        if (val !== null) {
           try {
-            listener(changes, "local")
-          } catch (e) {
-            console.error(e)
+            res[keys] = JSON.parse(val)
+          } catch {
+            res[keys] = val
           }
         }
-      },
-    }
-
-    const browserMock = {
-      runtime: {
-        id: "all-api-hub-web",
-        getURL: (path: string) => {
-          return window.location.origin + "/" + path
-        },
-        onMessage: {
-          addListener: () => {},
-          removeListener: () => {},
-        },
-        sendMessage: () => Promise.resolve(),
-      },
-      storage: {
-        local: localStore,
-        onChanged: {
-          addListener: (listener: any) => {
-            storageListeners.add(listener)
-          },
-          removeListener: (listener: any) => {
-            storageListeners.delete(listener)
-          },
-        },
-      },
-      tabs: {
-        query: () => Promise.resolve([]),
-        create: (props: any) => {
-          if (props?.url) window.open(props.url, "_blank")
-          return Promise.resolve({})
-        },
-        update: () => Promise.resolve({}),
-        sendMessage: () => Promise.resolve(),
-      },
-      alarms: {
-        create: (name: string, info: any) => {
-          const delay = info.delayInMinutes
-            ? info.delayInMinutes * 60 * 1000
-            : 0
-          const period = info.periodInMinutes
-            ? info.periodInMinutes * 60 * 1000
-            : 0
-          const trigger = () => {
-            const alarmObj = { name, scheduledTime: Date.now() }
-            for (const listener of alarmListeners) {
-              try {
-                listener(alarmObj)
-              } catch (e) {
-                console.error(e)
-              }
+        return res
+      }
+      if (Array.isArray(keys)) {
+        for (const k of keys) {
+          const val = localStorage.getItem(k)
+          if (val !== null) {
+            try {
+              res[k] = JSON.parse(val)
+            } catch {
+              res[k] = val
             }
           }
-          if (period) {
-            setInterval(trigger, period)
+        }
+        return res
+      }
+      if (typeof keys === "object") {
+        for (const k of Object.keys(keys)) {
+          const val = localStorage.getItem(k)
+          if (val !== null) {
+            try {
+              res[k] = JSON.parse(val)
+            } catch {
+              res[k] = val
+            }
           } else {
-            setTimeout(trigger, delay)
+            res[k] = keys[k]
           }
-        },
-        clear: () => Promise.resolve(true),
-        clearAll: () => Promise.resolve(true),
-        onAlarm: {
-          addListener: (listener: any) => {
-            alarmListeners.add(listener)
-          },
-          removeListener: (listener: any) => {
-            alarmListeners.delete(listener)
-          },
-        },
-      },
-      permissions: {
-        contains: () => Promise.resolve(true),
-        request: () => Promise.resolve(true),
-        remove: () => Promise.resolve(true),
-        getAll: () => Promise.resolve({ permissions: [], origins: [] }),
-        onAdded: {
-          addListener: () => {},
-          removeListener: () => {},
-        },
-        onRemoved: {
-          addListener: () => {},
-          removeListener: () => {},
-        },
-      },
-    }
+        }
+        return res
+      }
+      return res
+    },
+    set: async (items: Record<string, any>) => {
+      const changes: Record<string, any> = {}
+      for (const [k, v] of Object.entries(items)) {
+        const oldValStr = localStorage.getItem(k)
+        let oldVal = null
+        if (oldValStr !== null) {
+          try {
+            oldVal = JSON.parse(oldValStr)
+          } catch {
+            oldVal = oldValStr
+          }
+        }
+        localStorage.setItem(k, JSON.stringify(v))
+        changes[k] = { oldValue: oldVal, newValue: v }
+      }
+      for (const listener of storageListeners) {
+        try {
+          listener(changes, "local")
+        } catch (e) {
+          console.error(e)
+        }
+      }
+    },
+    remove: async (keys: string | string[]) => {
+      const changes: Record<string, any> = {}
+      const keysArr = Array.isArray(keys) ? keys : [keys]
+      for (const k of keysArr) {
+        const oldValStr = localStorage.getItem(k)
+        let oldVal = null
+        if (oldValStr !== null) {
+          try {
+            oldVal = JSON.parse(oldValStr)
+          } catch {
+            oldVal = oldValStr
+          }
+          localStorage.removeItem(k)
+          changes[k] = { oldValue: oldVal, newValue: undefined }
+        }
+      }
+      for (const listener of storageListeners) {
+        try {
+          listener(changes, "local")
+        } catch (e) {
+          console.error(e)
+        }
+      }
+    },
+    clear: async () => {
+      const changes: Record<string, any> = {}
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (k) {
+          const oldValStr = localStorage.getItem(k)
+          let oldVal = null
+          if (oldValStr !== null) {
+            try {
+              oldVal = JSON.parse(oldValStr)
+            } catch {
+              oldVal = oldValStr
+            }
+            changes[k] = { oldValue: oldVal, newValue: undefined }
+          }
+        }
+      }
+      localStorage.clear()
+      for (const listener of storageListeners) {
+        try {
+          listener(changes, "local")
+        } catch (e) {
+          console.error(e)
+        }
+      }
+    },
+  }
 
-    ;(globalThis as any).browser = browserMock
-    ;(globalThis as any).chrome = browserMock
+  const browserMock = {
+    runtime: {
+      id: "all-api-hub-web",
+      getURL: (path: string) => {
+        return window.location.origin + "/" + path
+      },
+      onMessage: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      sendMessage: () => Promise.resolve(),
+    },
+    storage: {
+      local: localStore,
+      onChanged: {
+        addListener: (listener: any) => {
+          storageListeners.add(listener)
+        },
+        removeListener: (listener: any) => {
+          storageListeners.delete(listener)
+        },
+      },
+    },
+    tabs: {
+      query: () => Promise.resolve([]),
+      create: (props: any) => {
+        if (props?.url) window.open(props.url, "_blank")
+        return Promise.resolve({})
+      },
+      update: () => Promise.resolve({}),
+      sendMessage: () => Promise.resolve(),
+    },
+    alarms: {
+      create: (name: string, info: any) => {
+        const delay = info.delayInMinutes ? info.delayInMinutes * 60 * 1000 : 0
+        const period = info.periodInMinutes
+          ? info.periodInMinutes * 60 * 1000
+          : 0
+        const trigger = () => {
+          const alarmObj = { name, scheduledTime: Date.now() }
+          for (const listener of alarmListeners) {
+            try {
+              listener(alarmObj)
+            } catch (e) {
+              console.error(e)
+            }
+          }
+        }
+        if (period) {
+          setInterval(trigger, period)
+        } else {
+          setTimeout(trigger, delay)
+        }
+      },
+      clear: () => Promise.resolve(true),
+      clearAll: () => Promise.resolve(true),
+      onAlarm: {
+        addListener: (listener: any) => {
+          alarmListeners.add(listener)
+        },
+        removeListener: (listener: any) => {
+          alarmListeners.delete(listener)
+        },
+      },
+    },
+    permissions: {
+      contains: () => Promise.resolve(true),
+      request: () => Promise.resolve(true),
+      remove: () => Promise.resolve(true),
+      getAll: () => Promise.resolve({ permissions: [], origins: [] }),
+      onAdded: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+      onRemoved: {
+        addListener: () => {},
+        removeListener: () => {},
+      },
+    },
+  }
+
+  ;(globalThis as any).browser = browserMock
+  ;(globalThis as any).chrome = browserMock
+} else {
+  if (typeof (globalThis as any).browser === "undefined") {
+    ;(globalThis as any).browser = (globalThis as any).chrome
   }
 }
 
